@@ -9,10 +9,9 @@ ADMIN_USERNAME = "Hridoyvhai146"
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "8418239556"))
 DEPOSIT_NUMBER = "01408886128"
 MIN_DEPOSIT = 50
-WORKER_REWARD = 1
-ADVERTISER_COST = 2
 REFER_BONUS = 4
-MIN_WITHDRAW = 100
+MIN_WITHDRAW = 50        # সর্বনিম্ন উত্তোলন ৫০ টাকা
+WITHDRAW_CHARGE_PERCENT = 3  # ৩% উইথড্র চার্জ
 DB_FILE = "database.json"
 BLOCKED_WORDS = ["18+", "porn", "xxx", "sex", "nude", "adult", "onlyfans", "pornhub"]
 
@@ -44,6 +43,17 @@ def get_user(db, user_id, username=""):
         db["users"][uid] = {"username": username, "balance": 0, "deposit_balance": 0, "refer_by": None, "done_tasks": [], "total_earn": 0}
     return db["users"][uid]
 
+def get_worker_reward(task_type):
+    """টাস্কের ক্যাটাগরি অনুযায়ী ওয়ার্কারের রেট নির্ধারণ"""
+    t = task_type.lower()
+    if "youtube" in t and "view" in t:
+        return 3
+    elif "tiktok" in t or "follow" in t:
+        return 3
+    elif "sub" in t or "subscribe" in t:
+        return 2
+    return 2 # ডিফল্ট রেট
+
 app_flask = Flask(__name__)
 
 @app_flask.after_request
@@ -63,7 +73,8 @@ def get_tasks():
     tasks = []
     for tid, t in db.get("tasks", {}).items():
         if t.get("active") and t.get("left", 0) > 0:
-            tasks.append({"id": tid, "title": t["title"], "link": t["link"], "type": t["type"], "left": t["left"], "total": t["total"]})
+            reward = t.get("reward", get_worker_reward(t["type"]))
+            tasks.append({"id": tid, "title": t["title"], "link": t["link"], "type": t["type"], "reward": reward, "left": t["left"], "total": t["total"]})
     return jsonify(tasks)
 
 def run_flask():
@@ -104,7 +115,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ref_id = context.args[0].replace("ref_", "")
             if ref_id != str(user.id) and u["refer_by"] is None:
                 u["refer_by"] = ref_id
-                # ✅ REFER BONUS 4 TAKA
                 try:
                     referrer = get_user(db, int(ref_id), "")
                     referrer["balance"] += REFER_BONUS
@@ -119,7 +129,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
     save_db(db)
-    await update.message.reply_text(f"👋 Welcome {user.first_name}!\n\n💰 Balance: {u['balance']} টাকা\n👥 Refer করে আয় করো! প্রতি Refer এ {REFER_BONUS} টাকা পাবা!\n\n👇 মেনু থেকে বেছে নাও:", reply_markup=main_menu(admin=is_admin(user)))
+    await update.message.reply_text(f"👋 Welcome {user.first_name}!\n\n💰 Balance: {u['balance']} টাকা\n👥 Refer করে আয় করো! প্রতি Refer এ {REFER_BONUS} টাকা পাবا!\n\n👇 মেনু থেকে বেছে নাও:", reply_markup=main_menu(admin=is_admin(user)))
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -137,21 +147,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "deposit":
         await q.edit_message_text(f"💵 Deposit\n\nNumber: {DEPOSIT_NUMBER}\nমিনিমাম: {MIN_DEPOSIT} টাকা\n\nলিখো: `/deposit 50 TrxID Bkash`", reply_markup=main_menu(admin=admin))
     elif data == "withdraw":
-        await q.edit_message_text(f"💸 Withdraw\n\nBalance: {u['balance']} টাকা\nমিনিমাম: {MIN_WITHDRAW} টাকা\n\nলিখো: `/withdraw 100 Bkash 014...`", reply_markup=main_menu(admin=admin))
+        await q.edit_message_text(f"💸 Withdraw\n\nBalance: {u['balance']} টাকা\nমিনিমাম: {MIN_WITHDRAW} টাকা (উত্তোলনে {WITHDRAW_CHARGE_PERCENT}% চার্জ প্রযোজ্য)\n\nলিখো: `/withdraw 100 Bkash 014...`", reply_markup=main_menu(admin=admin))
     elif data == "task_list":
         text = "📋 Task List:\n\n"
         found = False
         for tid, t in db.get("tasks", {}).items():
             if t.get("active") and t.get("left", 0) > 0:
                 found = True
-                text += f"ID: {tid} | {t['title']}\nLink: {t['link']}\nবাকি: {t['left']}/{t['total']} | Reward: {WORKER_REWARD} টাকা\n\n"
+                rew = t.get("reward", get_worker_reward(t["type"]))
+                text += f"ID: {tid} | [{t['type']}] {t['title']}\nLink: {t['link']}\nবাকি: {t['left']}/{t['total']} | Reward: {rew} টাকা\n\n"
         if not found:
             text = "এখন কোনো টাস্ক নাই।"
         else:
             text += "কাজ শেষে লিখো: `/proof task_id` তারপর Screenshot পাঠাও। বট নিজেই Auto Approve করবে।"
         await q.edit_message_text(text, reply_markup=main_menu(admin=admin))
     elif data == "add_task":
-        await q.edit_message_text("➕ Add Task\n\nলিখো:\n`/addtask Telegram | Title | Link | 10`", reply_markup=main_menu(admin=admin))
+        await q.edit_message_text("➕ Add Task\n\nরেট তালিকা:\n- YouTube View: ৩ টাকা\n- TikTok Follower: ৩ টাকা\n- Subscribe / Unsub: ২ টাকা\n\nলিখো:\n`/addtask YouTubeView | Title | Link | 10`", reply_markup=main_menu(admin=admin))
     elif data == "my_tasks":
         my = [t for t in db.get("tasks", {}).values() if str(t.get("owner")) == str(user.id)]
         text = "📊 তোমার টাস্ক:\n\n"
@@ -188,7 +199,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for key, w in db.get("withdraws", {}).items():
             if w.get("status") == "pending":
                 found = True
-                text += f"User: {w['user']} | {w['amount']} টাকা | {w['method']} {w['number']}\n\n"
+                text += f"User: {w['user']} | Requested: {w['amount']} টাকা | Payable: {w['net_amount']} টাকা (Charge: {w['charge']} টাকা) | {w['method']} {w['number']}\n\n"
         if not found:
             text = "কোনো Pending Withdraw নাই।"
         await q.edit_message_text(text, reply_markup=admin_menu())
@@ -219,6 +230,7 @@ async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or ""
     args = text.split()
     admin = is_admin(user)
+    
     if text.startswith("/admin"):
         if not admin:
             await update.message.reply_text("তুমি Admin না।")
@@ -227,6 +239,7 @@ async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pending_wd = len([w for w in db.get("withdraws", {}).values() if w.get("status") == "pending"])
         await update.message.reply_text(f"👨‍💻 Master Admin Panel\n\n👥 Total Users: {len(db.get('users', {}))}\n📋 Total Tasks: {len(db.get('tasks', {}))}\n📥 Pending Deposits: {pending_dep}\n💸 Pending Withdraws: {pending_wd}", reply_markup=admin_menu())
         return
+        
     if text.startswith("/deposit"):
         if len(args) < 4:
             await update.message.reply_text("লিখো: `/deposit 50 TrxID Bkash`", parse_mode="Markdown"); return
@@ -244,6 +257,7 @@ async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=ADMIN_ID, text=f"📥 নতুন Deposit!\nUser: {user.id} (@{user.username})\nAmount: {amt} টাকা\nTrx: {trx}\nMethod: {method}\nApprove: /approve_deposit {user.id} {trx}")
         except:
             pass
+            
     elif text.startswith("/approve_deposit"):
         if not admin:
             await update.message.reply_text("তুমি Admin না।"); return
@@ -262,6 +276,7 @@ async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=int(args[1]), text=f"✅ তোমার {d['amount']} টাকা Deposit Approve হইছে!")
         except:
             pass
+            
     elif text.startswith("/withdraw"):
         if len(args) < 4:
             await update.message.reply_text("লিখো: `/withdraw 100 Bkash 014...`"); return
@@ -273,36 +288,73 @@ async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"মিনিমাম {MIN_WITHDRAW} টাকা।"); return
         if u["balance"] < amt:
             await update.message.reply_text("Balance যথেষ্ট নাই।"); return
+            
+        # ৩% চার্জ কাটার হিসাব
+        charge = round((amt * WITHDRAW_CHARGE_PERCENT) / 100, 2)
+        net_amount = round(amt - charge, 2)
+        
         u["balance"] -= amt
-        db["withdraws"][f"{user.id}_{len(db['withdraws'])}"] = {"user": str(user.id), "amount": amt, "method": args[2], "number": args[3], "status": "pending"}
+        db["withdraws"][f"{user.id}_{len(db['withdraws'])}"] = {
+            "user": str(user.id), 
+            "amount": amt, 
+            "charge": charge,
+            "net_amount": net_amount,
+            "method": args[2], 
+            "number": args[3], 
+            "status": "pending"
+        }
         save_db(db)
-        await update.message.reply_text(f"✅ Withdraw Request পাঠানো হইছে: {amt} টাকা।")
+        await update.message.reply_text(f"✅ Withdraw Request সফল হয়েছে!\nRequested: {amt} টাকা\nCharge (3%): {charge} টাকা\nNet Payable: {net_amount} টাকা।")
+        try:
+            await context.bot.send_message(chat_id=ADMIN_ID, text=f"💸 নতুন Withdraw Request!\nUser: {user.id}\nAmount: {amt} টাকা\nCharge: {charge} টাকা\nNet Give: {net_amount} টাকা\nMethod: {args[2]} ({args[3]})")
+        except:
+            pass
+            
     elif text.startswith("/addtask"):
         try:
             parts = text.replace("/addtask ", "").split("|")
             typ = parts[0].strip(); title = parts[1].strip(); link = parts[2].strip(); count = int(parts[3].strip())
         except:
-            await update.message.reply_text("ফরম্যাট ভুল! `/addtask Telegram | Title | Link | 10`"); return
+            await update.message.reply_text("ফরম্যাট ভুল! `/addtask YouTubeView | Title | Link | 10`"); return
+            
         low = (title + " " + link).lower()
         if any(w in low for w in BLOCKED_WORDS):
             await update.message.reply_text("⛔ ১৮+ / Adult লিংক অ্যাড করা যাবে না।"); return
-        cost = count * ADVERTISER_COST
-        if u["deposit_balance"] < cost and not admin:
-            await update.message.reply_text(f"❌ Deposit Balance যথেষ্ট নাই। লাগবে {cost} টাকা, আছে {u['deposit_balance']} টাকা।"); return
+            
+        # অটো রেট নির্ধারণ (ইউটিউব/টিকটক ৩ টাকা, সাবস্ক্রাইব ২ টাকা)
+        reward = get_worker_reward(typ)
+        advertiser_cost = reward + 2 # প্ল্যাটফর্ম প্রফিট সহ খরচ
+        total_cost = count * advertiser_cost
+        
+        if u["deposit_balance"] < total_cost and not admin:
+            await update.message.reply_text(f"❌ Deposit Balance যথেষ্ট নাই। লাগবে {total_cost} টাকা, আছে {u['deposit_balance']} টাকা।"); return
+            
+        if not admin:
+            u["deposit_balance"] -= total_cost
+            
         db["task_counter"] += 1
         tid = str(db["task_counter"])
-        db["tasks"][tid] = {"id": tid, "owner": str(user.id), "type": typ, "title": title, "link": link, "total": count, "left": count, "active": True, "done_by": []}
+        db["tasks"][tid] = {
+            "id": tid, 
+            "owner": str(user.id), 
+            "type": typ, 
+            "title": title, 
+            "link": link, 
+            "reward": reward,
+            "total": count, 
+            "left": count, 
+            "active": True, 
+            "done_by": []
+        }
         save_db(db)
-        await update.message.reply_text(f"✅ Task অ্যাড হইছে!\nID: {tid}\n{title}\nTotal: {count} জন")
+        await update.message.reply_text(f"✅ Task অ্যাড হইছে!\nID: {tid}\nType: {typ}\nTitle: {title}\nReward: {reward} টাকা/জন\nTotal Cost: {total_cost} টাকা")
+        
     elif text.startswith("/proof"):
         if len(args) < 2:
-            await update.message.reply_text("লিখো: `/proof task_id` তারপর Screenshot পাঠাও।"); return
+            await update.message.reply_text("লিখো: `/proof task_id` তারপর Screenshot পাঠાવો।"); return
         context.user_data["proof_task"] = args[1]
-        await update.message.reply_text("এখন Screenshot টা পাঠাও। বট নিজেই Auto Approve করবে।")
-    elif text.startswith("/approve_task"):
-        if not admin:
-            await update.message.reply_text("এখন Auto Approve চালু আছে।"); return
-        await update.message.reply_text("এখন Auto Approve চালু আছে, হাতে Approve লাগে না। ইউজার ছবি দিলেই টাকা পেয়ে যাবে।")
+        await update.message.reply_text("এখন Screenshot টা পাঠાવો। বট নিজেই Auto Approve করবে।")
+        
     save_db(db)
 
 # ===== AUTO APPROVE + AUTO /start MENU =====
@@ -327,21 +379,21 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ এই টাস্ক শেষ হয়ে গেছে।")
         context.user_data["proof_task"] = None
         return
-    worker["balance"] += WORKER_REWARD
-    worker["total_earn"] += WORKER_REWARD
+        
+    reward = t.get("reward", get_worker_reward(t["type"]))
+    worker["balance"] += reward
+    worker["total_earn"] += reward
     worker["done_tasks"].append(str(tid))
     t["done_by"].append(str(user.id))
     t["left"] -= 1
-    owner = db["users"].get(t["owner"])
-    if owner:
-        owner["deposit_balance"] -= ADVERTISER_COST
+    
     if t["left"] <= 0:
         t["active"] = False
     save_db(db)
-    # ✅ টাকা দেওয়ার পর অটোমেটিক /start এর মেনু আবার দেখাবে
-    await update.message.reply_text(f"✅ Auto Approve হইছে!\n\n🎉 তুমি {WORKER_REWARD} টাকা পাইছো!\n💰 নতুন Balance: {worker['balance']} টাকা\n\n👇 আবার মেনু থেকে বেছে নাও:", reply_markup=main_menu(admin=is_admin(user)))
+    
+    await update.message.reply_text(f"✅ Auto Approve হইছে!\n\n🎉 তুমি {reward} টাকা পাইছো!\n💰 নতুন Balance: {worker['balance']} টাকা\n\n👇 আবার মেনু থেকে বেছে নাও:", reply_markup=main_menu(admin=is_admin(user)))
     try:
-        await context.bot.send_photo(chat_id=ADMIN_ID, photo=update.message.photo[-1].file_id, caption=f"✅ Auto Approved!\n\nTask: {tid} | {t['title']}\nUser: {user.id} (@{user.username})\nReward: {WORKER_REWARD} টাকা দেওয়া হইছে।\nবাকি: {t['left']}/{t['total']}")
+        await context.bot.send_photo(chat_id=ADMIN_ID, photo=update.message.photo[-1].file_id, caption=f"✅ Auto Approved!\n\nTask: {tid} | {t['title']}\nUser: {user.id} (@{user.username})\nReward: {reward} টাকা দেওয়া হইছে।\nবাকি: {t['left']}/{t['total']}")
     except Exception as e:
         print(f"Auto proof notify error: {e}")
     context.user_data["proof_task"] = None
