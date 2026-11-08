@@ -6,6 +6,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 # ===== SETTINGS =====
 TOKEN = os.environ.get("BOT_TOKEN", "PUT_YOUR_TOKEN_HERE")
 ADMIN_USERNAME = "Hridoyvhai146"
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "8418239556"))
 DEPOSIT_NUMBER = "01408886128"
 MIN_DEPOSIT = 50
 WORKER_REWARD = 1
@@ -13,6 +14,15 @@ ADVERTISER_COST = 2
 MIN_WITHDRAW = 100
 DB_FILE = "database.json"
 BLOCKED_WORDS = ["18+", "porn", "xxx", "sex", "nude", "adult", "onlyfans", "pornhub"]
+
+def is_admin(user):
+    if not user:
+        return False
+    if user.id == ADMIN_ID:
+        return True
+    if user.username and user.username.lower() == ADMIN_USERNAME.lower():
+        return True
+    return False
 
 # ===== DB FUNCTIONS =====
 def load_db():
@@ -61,14 +71,32 @@ def run_flask():
     port = int(os.environ.get("PORT", 10000))
     app_flask.run(host="0.0.0.0", port=port)
 
-def main_menu():
+def main_menu(admin=False):
     kb = [
         [InlineKeyboardButton("💰 Balance", callback_data="balance"), InlineKeyboardButton("👥 Refer", callback_data="refer")],
         [InlineKeyboardButton("💵 Deposit", callback_data="deposit"), InlineKeyboardButton("💸 Withdraw", callback_data="withdraw")],
         [InlineKeyboardButton("📋 Task List (Earn)", callback_data="task_list"), InlineKeyboardButton("➕ Add Task", callback_data="add_task")],
         [InlineKeyboardButton("📊 My Tasks", callback_data="my_tasks"), InlineKeyboardButton("🆘 Support", callback_data="support")],
     ]
+    if admin:
+        kb.append([InlineKeyboardButton("👨‍💻 Master Admin Panel", callback_data="admin_panel")])
     return InlineKeyboardMarkup(kb)
+
+def admin_menu():
+    kb = [
+        [InlineKeyboardButton("📥 Pending Deposits", callback_data="admin_deposits"), InlineKeyboardButton("💸 Pending Withdraws", callback_data="admin_withdraws")],
+        [InlineKeyboardButton("👥 All Users", callback_data="admin_users"), InlineKeyboardButton("📋 All Tasks", callback_data="admin_tasks")],
+        [InlineKeyboardButton("🔙 Back", callback_data="back")],
+    ]
+    return InlineKeyboardMarkup(kb)
+
+async def show_admin_panel(q, db, user):
+    pending_dep = len([d for d in db.get("deposits", {}).values() if d.get("status") == "pending"])
+    pending_wd = len([w for w in db.get("withdraws", {}).values() if w.get("status") == "pending"])
+    total_users = len(db.get("users", {}))
+    total_tasks = len(db.get("tasks", {}))
+    text = f"👨‍💻 Master Admin Panel\n\n👥 Total Users: {total_users}\n📋 Total Tasks: {total_tasks}\n📥 Pending Deposits: {pending_dep}\n💸 Pending Withdraws: {pending_wd}\n\n👇 নিচ থেকে বেছে নাও:"
+    await q.edit_message_text(text, reply_markup=admin_menu())
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = load_db()
@@ -82,7 +110,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
     save_db(db)
-    await update.message.reply_text(f"👋 Welcome {user.first_name}!\n\n💰 Balance: {u['balance']} টাকা\n👥 Refer করে আয় করো!\n\n👇 মেনু থেকে বেছে নাও:", reply_markup=main_menu())
+    admin = is_admin(user)
+    await update.message.reply_text(f"👋 Welcome {user.first_name}!\n\n💰 Balance: {u['balance']} টাকা\n👥 Refer করে আয় করো!\n\n👇 মেনু থেকে বেছে নাও:", reply_markup=main_menu(admin=admin))
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -91,15 +120,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = q.from_user
     u = get_user(db, user.id, user.username or "")
     data = q.data
+    admin = is_admin(user)
+
     if data == "balance":
-        await q.edit_message_text(f"💰 তোমার Balance\n\nEarn Balance: {u['balance']} টাকা\nDeposit Balance: {u['deposit_balance']} টাকা\nTotal Earn: {u['total_earn']} টাকা", reply_markup=main_menu())
+        await q.edit_message_text(f"💰 তোমার Balance\n\nEarn Balance: {u['balance']} টাকা\nDeposit Balance: {u['deposit_balance']} টাকা\nTotal Earn: {u['total_earn']} টাকা", reply_markup=main_menu(admin=admin))
     elif data == "refer":
         link = f"https://t.me/{context.bot.username}?start=ref_{user.id}"
-        await q.edit_message_text(f"👥 Refer Link:\n{link}\n\nপ্রতি Refer এ বোনাস পাবা!", reply_markup=main_menu())
+        await q.edit_message_text(f"👥 Refer Link:\n{link}\n\nপ্রতি Refer এ বোনাস পাবা!", reply_markup=main_menu(admin=admin))
     elif data == "deposit":
-        await q.edit_message_text(f"💵 Deposit\n\nNumber: {DEPOSIT_NUMBER}\nমিনিমাম: {MIN_DEPOSIT} টাকা\n\nলিখো: `/deposit 50 TrxID Bkash`", reply_markup=main_menu())
+        await q.edit_message_text(f"💵 Deposit\n\nNumber: {DEPOSIT_NUMBER}\nমিনিমাম: {MIN_DEPOSIT} টাকা\n\nলিখো: `/deposit 50 TrxID Bkash`", reply_markup=main_menu(admin=admin))
     elif data == "withdraw":
-        await q.edit_message_text(f"💸 Withdraw\n\nBalance: {u['balance']} টাকা\nমিনিমাম: {MIN_WITHDRAW} টাকা\n\nলিখো: `/withdraw 100 Bkash 014...`", reply_markup=main_menu())
+        await q.edit_message_text(f"💸 Withdraw\n\nBalance: {u['balance']} টাকা\nমিনিমাম: {MIN_WITHDRAW} টাকা\n\nলিখো: `/withdraw 100 Bkash 014...`", reply_markup=main_menu(admin=admin))
     elif data == "task_list":
         text = "📋 Task List:\n\n"
         found = False
@@ -111,9 +142,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text = "এখন কোনো টাস্ক নাই।"
         else:
             text += "কাজ শেষে লিখো: `/proof task_id` তারপর Screenshot পাঠাও।"
-        await q.edit_message_text(text, reply_markup=main_menu())
+        await q.edit_message_text(text, reply_markup=main_menu(admin=admin))
     elif data == "add_task":
-        await q.edit_message_text("➕ Add Task\n\nলিখো:\n`/addtask Telegram | Title | Link | 10`", reply_markup=main_menu())
+        await q.edit_message_text("➕ Add Task\n\nলিখো:\n`/addtask Telegram | Title | Link | 10`", reply_markup=main_menu(admin=admin))
     elif data == "my_tasks":
         my = [t for t in db.get("tasks", {}).values() if str(t.get("owner")) == str(user.id)]
         text = "📊 তোমার টাস্ক:\n\n"
@@ -122,11 +153,56 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             for t in my:
                 text += f"🔹 {t['title']} - বাকি: {t['left']}/{t['total']}\n"
-        await q.edit_message_text(text, reply_markup=main_menu())
+        await q.edit_message_text(text, reply_markup=main_menu(admin=admin))
     elif data == "support":
-        await q.edit_message_text(f"🆘 Support\n\nAdmin: @{ADMIN_USERNAME}", reply_markup=main_menu())
+        await q.edit_message_text(f"🆘 Support\n\nAdmin: @{ADMIN_USERNAME}", reply_markup=main_menu(admin=admin))
+    elif data == "admin_panel":
+        if not admin:
+            await q.edit_message_text("তুমি Admin না।", reply_markup=main_menu(admin=False))
+            return
+        await show_admin_panel(q, db, user)
+    elif data == "admin_deposits":
+        if not admin:
+            return
+        text = "📥 Pending Deposits:\n\n"
+        found = False
+        for key, d in db.get("deposits", {}).items():
+            if d.get("status") == "pending":
+                found = True
+                text += f"User: {d['user']} | {d['amount']} টাকা | Trx: {d['trx']} | {d['method']}\nApprove: `/approve_deposit {d['user']} {d['trx']}`\n\n"
+        if not found:
+            text = "কোনো Pending Deposit নাই।"
+        await q.edit_message_text(text, reply_markup=admin_menu())
+    elif data == "admin_withdraws":
+        if not admin:
+            return
+        text = "💸 Pending Withdraws:\n\n"
+        found = False
+        for key, w in db.get("withdraws", {}).items():
+            if w.get("status") == "pending":
+                found = True
+                text += f"User: {w['user']} | {w['amount']} টাকা | {w['method']} {w['number']}\n\n"
+        if not found:
+            text = "কোনো Pending Withdraw নাই।"
+        await q.edit_message_text(text, reply_markup=admin_menu())
+    elif data == "admin_users":
+        if not admin:
+            return
+        text = f"👥 Total Users: {len(db.get('users', {}))}\n\n"
+        for uid, ud in list(db.get("users", {}).items())[:20]:
+            text += f"ID: {uid} | @{ud.get('username','')} | Bal: {ud.get('balance',0)} | Dep: {ud.get('deposit_balance',0)}\n"
+        await q.edit_message_text(text, reply_markup=admin_menu())
+    elif data == "admin_tasks":
+        if not admin:
+            return
+        text = "📋 All Tasks:\n\n"
+        for tid, t in db.get("tasks", {}).items():
+            text += f"ID: {tid} | {t['title']} | বাকি: {t['left']}/{t['total']} | Active: {t.get('active')}\n"
+        if not db.get("tasks"):
+            text = "কোনো টাস্ক নাই।"
+        await q.edit_message_text(text, reply_markup=admin_menu())
     elif data == "back":
-        await q.edit_message_text("👇 মেনু থেকে বেছে নাও:", reply_markup=main_menu())
+        await q.edit_message_text("👇 মেনু থেকে বেছে নাও:", reply_markup=main_menu(admin=admin))
     save_db(db)
 
 async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -135,6 +211,23 @@ async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = get_user(db, user.id, user.username or "")
     text = update.message.text or ""
     args = text.split()
+    admin = is_admin(user)
+
+    if text.startswith("/admin"):
+        if not admin:
+            await update.message.reply_text("তুমি Admin না।")
+            return
+        pending_dep = len([d for d in db.get("deposits", {}).values() if d.get("status") == "pending"])
+        pending_wd = len([w for w in db.get("withdraws", {}).values() if w.get("status") == "pending"])
+        await update.message.reply_text(f"👨‍💻 Master Admin Panel\n\n👥 Total Users: {len(db.get('users', {}))}\n📋 Total Tasks: {len(db.get('tasks', {}))}\n📥 Pending Deposits: {pending_dep}\n💸 Pending Withdraws: {pending_wd}", reply_markup=admin_menu())
+        return
+    if "Master Admin Panel" in text:
+        if not admin:
+            await update.message.reply_text("তুমি Admin না।")
+            return
+        await update.message.reply_text("👨‍💻 Master Admin Panel", reply_markup=admin_menu())
+        return
+
     if text.startswith("/deposit"):
         if len(args) < 4:
             await update.message.reply_text("লিখো: `/deposit 50 TrxID Bkash`", parse_mode="Markdown"); return
@@ -148,8 +241,12 @@ async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db["deposits"][f"{user.id}_{trx}"] = {"user": str(user.id), "amount": amt, "trx": trx, "method": method, "status": "pending"}
         save_db(db)
         await update.message.reply_text(f"✅ Deposit Request পাঠানো হইছে!\nAmount: {amt} টাকা\nTrxID: {trx}\nAdmin Approve করলেই যোগ হবে।")
+        try:
+            await context.bot.send_message(chat_id=ADMIN_ID, text=f"📥 নতুন Deposit!\nUser: {user.id} (@{user.username})\nAmount: {amt} টাকা\nTrx: {trx}\nMethod: {method}\nApprove: /approve_deposit {user.id} {trx}")
+        except:
+            pass
     elif text.startswith("/approve_deposit"):
-        if user.username != ADMIN_USERNAME:
+        if not admin:
             await update.message.reply_text("তুমি Admin না।"); return
         if len(args) < 3:
             await update.message.reply_text("লিখো: `/approve_deposit user_id trx`"); return
@@ -204,7 +301,7 @@ async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["proof_task"] = args[1]
         await update.message.reply_text("এখন Screenshot টা পাঠাও। Admin Approve করবে।")
     elif text.startswith("/approve_task"):
-        if user.username != ADMIN_USERNAME:
+        if not admin:
             await update.message.reply_text("তুমি Admin না।"); return
         if len(args) < 3:
             await update.message.reply_text("লিখো: `/approve_task task_id user_id`"); return
