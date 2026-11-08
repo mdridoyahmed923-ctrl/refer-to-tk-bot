@@ -24,7 +24,6 @@ def is_admin(user):
         return True
     return False
 
-# ===== DB FUNCTIONS =====
 def load_db():
     if not os.path.exists(DB_FILE):
         return {"users": {}, "tasks": {}, "deposits": {}, "withdraws": {}, "task_counter": 0}
@@ -44,7 +43,6 @@ def get_user(db, user_id, username=""):
         db["users"][uid] = {"username": username, "balance": 0, "deposit_balance": 0, "refer_by": None, "done_tasks": [], "total_earn": 0}
     return db["users"][uid]
 
-# ===== Flask for Render 24h alive =====
 app_flask = Flask(__name__)
 
 @app_flask.after_request
@@ -137,7 +135,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not found:
             text = "এখন কোনো টাস্ক নাই।"
         else:
-            text += "কাজ শেষে লিখো: `/proof task_id` তারপর Screenshot পাঠাও।"
+            text += "কাজ শেষে লিখো: `/proof task_id` তারপর Screenshot পাঠাও। বট নিজেই Auto Approve করবে।"
         await q.edit_message_text(text, reply_markup=main_menu(admin=admin))
     elif data == "add_task":
         await q.edit_message_text("➕ Add Task\n\nলিখো:\n`/addtask Telegram | Title | Link | 10`", reply_markup=main_menu(admin=admin))
@@ -216,12 +214,6 @@ async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pending_wd = len([w for w in db.get("withdraws", {}).values() if w.get("status") == "pending"])
         await update.message.reply_text(f"👨‍💻 Master Admin Panel\n\n👥 Total Users: {len(db.get('users', {}))}\n📋 Total Tasks: {len(db.get('tasks', {}))}\n📥 Pending Deposits: {pending_dep}\n💸 Pending Withdraws: {pending_wd}", reply_markup=admin_menu())
         return
-    if "Master Admin Panel" in text:
-        if not admin:
-            await update.message.reply_text("তুমি Admin না।")
-            return
-        await update.message.reply_text("👨‍💻 Master Admin Panel", reply_markup=admin_menu())
-        return
     if text.startswith("/deposit"):
         if len(args) < 4:
             await update.message.reply_text("লিখো: `/deposit 50 TrxID Bkash`", parse_mode="Markdown"); return
@@ -282,59 +274,62 @@ async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if any(w in low for w in BLOCKED_WORDS):
             await update.message.reply_text("⛔ ১৮+ / Adult লিংক অ্যাড করা যাবে না।"); return
         cost = count * ADVERTISER_COST
-        if u["deposit_balance"] < cost:
+        if u["deposit_balance"] < cost and not admin:
             await update.message.reply_text(f"❌ Deposit Balance যথেষ্ট নাই। লাগবে {cost} টাকা, আছে {u['deposit_balance']} টাকা।"); return
         db["task_counter"] += 1
         tid = str(db["task_counter"])
         db["tasks"][tid] = {"id": tid, "owner": str(user.id), "type": typ, "title": title, "link": link, "total": count, "left": count, "active": True, "done_by": []}
         save_db(db)
-        await update.message.reply_text(f"✅ Task অ্যাড হইছে!\n{title}\nTotal: {count} জন\nখরচ হবে: {cost} টাকা")
+        await update.message.reply_text(f"✅ Task অ্যাড হইছে!\nID: {tid}\n{title}\nTotal: {count} জন")
     elif text.startswith("/proof"):
         if len(args) < 2:
             await update.message.reply_text("লিখো: `/proof task_id` তারপর Screenshot পাঠাও।"); return
         context.user_data["proof_task"] = args[1]
-        await update.message.reply_text("এখন Screenshot টা পাঠাও। Admin Approve করবে।")
+        await update.message.reply_text("এখন Screenshot টা পাঠাও। বট নিজেই Auto Approve করবে।")
     elif text.startswith("/approve_task"):
         if not admin:
-            await update.message.reply_text("তুমি Admin না।"); return
-        if len(args) < 3:
-            await update.message.reply_text("লিখো: `/approve_task task_id user_id`"); return
-        tid, worker_id = args[1], args[2]
-        t = db["tasks"].get(tid)
-        worker = get_user(db, int(worker_id))
-        if not t:
-            await update.message.reply_text("Task নাই।"); return
-        if worker_id in t["done_by"]:
-            await update.message.reply_text("আগেই Approve করা হইছে।"); return
-        worker["balance"] += WORKER_REWARD
-        worker["total_earn"] += WORKER_REWARD
-        worker["done_tasks"].append(tid)
-        t["done_by"].append(worker_id)
-        t["left"] -= 1
-        owner = db["users"].get(t["owner"])
-        if owner:
-            owner["deposit_balance"] -= ADVERTISER_COST
-        if t["left"] <= 0:
-            t["active"] = False
-        save_db(db)
-        await update.message.reply_text("✅ Task Approve হইছে, Worker ১ টাকা পাইছে।")
-        try:
-            await context.bot.send_message(chat_id=int(worker_id), text=f"✅ তোমার টাস্ক Approve হইছে! ১ টাকা পাইছো। Balance: {worker['balance']} টাকা")
-        except:
-            pass
+            await update.message.reply_text("এখন Auto Approve চালু আছে।"); return
+        await update.message.reply_text("এখন Auto Approve চালু আছে, হাতে Approve লাগে না। ইউজার ছবি দিলেই টাকা পেয়ে যাবে।")
     save_db(db)
 
+# ===== AUTO APPROVE =====
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tid = context.user_data.get("proof_task")
     if not tid:
         await update.message.reply_text("আগে `/proof task_id` লিখো, তারপর Screenshot পাঠাও।")
         return
     user = update.effective_user
-    await update.message.reply_text("✅ Screenshot পাঠানো হইছে। Admin Approve করলেই ১ টাকা পাবা।")
+    db = load_db()
+    t = db.get("tasks", {}).get(str(tid))
+    worker = get_user(db, user.id, user.username or "")
+    if not t:
+        await update.message.reply_text("❌ এই Task ID দিয়ে কোনো টাস্ক নাই।")
+        context.user_data["proof_task"] = None
+        return
+    if str(user.id) in t.get("done_by", []):
+        await update.message.reply_text("❌ তুমি এই টাস্কের টাকা আগেই নিয়ে নিছো।")
+        context.user_data["proof_task"] = None
+        return
+    if t.get("left", 0) <= 0 or not t.get("active"):
+        await update.message.reply_text("❌ এই টাস্ক শেষ হয়ে গেছে।")
+        context.user_data["proof_task"] = None
+        return
+    worker["balance"] += WORKER_REWARD
+    worker["total_earn"] += WORKER_REWARD
+    worker["done_tasks"].append(str(tid))
+    t["done_by"].append(str(user.id))
+    t["left"] -= 1
+    owner = db["users"].get(t["owner"])
+    if owner:
+        owner["deposit_balance"] -= ADVERTISER_COST
+    if t["left"] <= 0:
+        t["active"] = False
+    save_db(db)
+    await update.message.reply_text(f"✅ Auto Approve হইছে!\n\n🎉 তুমি {WORKER_REWARD} টাকা পাইছো!\n💰 নতুন Balance: {worker['balance']} টাকা")
     try:
-        await context.bot.send_photo(chat_id=ADMIN_ID, photo=update.message.photo[-1].file_id, caption=f"📸 নতুন Proof!\n\nTask ID: {tid}\nUser: {user.id} (@{user.username})\n\nApprove করতে লিখো:\n/approve_task {tid} {user.id}")
+        await context.bot.send_photo(chat_id=ADMIN_ID, photo=update.message.photo[-1].file_id, caption=f"✅ Auto Approved!\n\nTask: {tid} | {t['title']}\nUser: {user.id} (@{user.username})\nReward: {WORKER_REWARD} টাকা দেওয়া হইছে।\nবাকি: {t['left']}/{t['total']}")
     except Exception as e:
-        print(f"Proof forward error: {e}")
+        print(f"Auto proof notify error: {e}")
     context.user_data["proof_task"] = None
 
 def main():
