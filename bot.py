@@ -90,12 +90,10 @@ def admin_menu():
     ]
     return InlineKeyboardMarkup(kb)
 
-async def show_admin_panel(q, db, user):
+async def show_admin_panel(q, db):
     pending_dep = len([d for d in db.get("deposits", {}).values() if d.get("status") == "pending"])
     pending_wd = len([w for w in db.get("withdraws", {}).values() if w.get("status") == "pending"])
-    total_users = len(db.get("users", {}))
-    total_tasks = len(db.get("tasks", {}))
-    text = f"👨‍💻 Master Admin Panel\n\n👥 Total Users: {total_users}\n📋 Total Tasks: {total_tasks}\n📥 Pending Deposits: {pending_dep}\n💸 Pending Withdraws: {pending_wd}\n\n👇 নিচ থেকে বেছে নাও:"
+    text = f"👨‍💻 Master Admin Panel\n\n👥 Total Users: {len(db.get('users', {}))}\n📋 Total Tasks: {len(db.get('tasks', {}))}\n📥 Pending Deposits: {pending_dep}\n💸 Pending Withdraws: {pending_wd}\n\n👇 নিচ থেকে বেছে নাও:"
     await q.edit_message_text(text, reply_markup=admin_menu())
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -110,8 +108,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
     save_db(db)
-    admin = is_admin(user)
-    await update.message.reply_text(f"👋 Welcome {user.first_name}!\n\n💰 Balance: {u['balance']} টাকা\n👥 Refer করে আয় করো!\n\n👇 মেনু থেকে বেছে নাও:", reply_markup=main_menu(admin=admin))
+    await update.message.reply_text(f"👋 Welcome {user.first_name}!\n\n💰 Balance: {u['balance']} টাকা\n👥 Refer করে আয় করো!\n\n👇 মেনু থেকে বেছে নাও:", reply_markup=main_menu(admin=is_admin(user)))
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -121,7 +118,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = get_user(db, user.id, user.username or "")
     data = q.data
     admin = is_admin(user)
-
     if data == "balance":
         await q.edit_message_text(f"💰 তোমার Balance\n\nEarn Balance: {u['balance']} টাকা\nDeposit Balance: {u['deposit_balance']} টাকা\nTotal Earn: {u['total_earn']} টাকা", reply_markup=main_menu(admin=admin))
     elif data == "refer":
@@ -160,7 +156,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not admin:
             await q.edit_message_text("তুমি Admin না।", reply_markup=main_menu(admin=False))
             return
-        await show_admin_panel(q, db, user)
+        await show_admin_panel(q, db)
     elif data == "admin_deposits":
         if not admin:
             return
@@ -212,7 +208,6 @@ async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or ""
     args = text.split()
     admin = is_admin(user)
-
     if text.startswith("/admin"):
         if not admin:
             await update.message.reply_text("তুমি Admin না।")
@@ -227,7 +222,6 @@ async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await update.message.reply_text("👨‍💻 Master Admin Panel", reply_markup=admin_menu())
         return
-
     if text.startswith("/deposit"):
         if len(args) < 4:
             await update.message.reply_text("লিখো: `/deposit 50 TrxID Bkash`", parse_mode="Markdown"); return
@@ -333,8 +327,14 @@ async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tid = context.user_data.get("proof_task")
     if not tid:
-        await update.message.reply_text("আগে `/proof task_id` লিখো, তারপর Screenshot পাঠাও।"); return
+        await update.message.reply_text("আগে `/proof task_id` লিখো, তারপর Screenshot পাঠাও।")
+        return
+    user = update.effective_user
     await update.message.reply_text("✅ Screenshot পাঠানো হইছে। Admin Approve করলেই ১ টাকা পাবা।")
+    try:
+        await context.bot.send_photo(chat_id=ADMIN_ID, photo=update.message.photo[-1].file_id, caption=f"📸 নতুন Proof!\n\nTask ID: {tid}\nUser: {user.id} (@{user.username})\n\nApprove করতে লিখো:\n/approve_task {tid} {user.id}")
+    except Exception as e:
+        print(f"Proof forward error: {e}")
     context.user_data["proof_task"] = None
 
 def main():
