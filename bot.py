@@ -11,6 +11,7 @@ DEPOSIT_NUMBER = "01408886128"
 MIN_DEPOSIT = 50
 WORKER_REWARD = 1
 ADVERTISER_COST = 2
+REFER_BONUS = 4
 MIN_WITHDRAW = 100
 DB_FILE = "database.json"
 BLOCKED_WORDS = ["18+", "porn", "xxx", "sex", "nude", "adult", "onlyfans", "pornhub"]
@@ -103,10 +104,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ref_id = context.args[0].replace("ref_", "")
             if ref_id != str(user.id) and u["refer_by"] is None:
                 u["refer_by"] = ref_id
+                # ✅ REFER BONUS 4 TAKA
+                try:
+                    referrer = get_user(db, int(ref_id), "")
+                    referrer["balance"] += REFER_BONUS
+                    referrer["total_earn"] += REFER_BONUS
+                    save_db(db)
+                    try:
+                        await context.bot.send_message(chat_id=int(ref_id), text=f"🎉 তোমার রেফারে একজন জয়েন করছে!\n\n💰 তুমি {REFER_BONUS} টাকা বোনাস পাইছো!\nনতুন Balance: {referrer['balance']} টাকা", reply_markup=main_menu(admin=is_admin(user)))
+                    except:
+                        pass
+                except:
+                    pass
         except:
             pass
     save_db(db)
-    await update.message.reply_text(f"👋 Welcome {user.first_name}!\n\n💰 Balance: {u['balance']} টাকা\n👥 Refer করে আয় করো!\n\n👇 মেনু থেকে বেছে নাও:", reply_markup=main_menu(admin=is_admin(user)))
+    await update.message.reply_text(f"👋 Welcome {user.first_name}!\n\n💰 Balance: {u['balance']} টাকা\n👥 Refer করে আয় করো! প্রতি Refer এ {REFER_BONUS} টাকা পাবা!\n\n👇 মেনু থেকে বেছে নাও:", reply_markup=main_menu(admin=is_admin(user)))
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -120,7 +133,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(f"💰 তোমার Balance\n\nEarn Balance: {u['balance']} টাকা\nDeposit Balance: {u['deposit_balance']} টাকা\nTotal Earn: {u['total_earn']} টাকা", reply_markup=main_menu(admin=admin))
     elif data == "refer":
         link = f"https://t.me/{context.bot.username}?start=ref_{user.id}"
-        await q.edit_message_text(f"👥 Refer Link:\n{link}\n\nপ্রতি Refer এ বোনাস পাবা!", reply_markup=main_menu(admin=admin))
+        await q.edit_message_text(f"👥 Refer Link:\n{link}\n\nপ্রতি Refer এ {REFER_BONUS} টাকা বোনাস পাবা!", reply_markup=main_menu(admin=admin))
     elif data == "deposit":
         await q.edit_message_text(f"💵 Deposit\n\nNumber: {DEPOSIT_NUMBER}\nমিনিমাম: {MIN_DEPOSIT} টাকা\n\nলিখো: `/deposit 50 TrxID Bkash`", reply_markup=main_menu(admin=admin))
     elif data == "withdraw":
@@ -292,7 +305,7 @@ async def handle_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("এখন Auto Approve চালু আছে, হাতে Approve লাগে না। ইউজার ছবি দিলেই টাকা পেয়ে যাবে।")
     save_db(db)
 
-# ===== AUTO APPROVE =====
+# ===== AUTO APPROVE + AUTO /start MENU =====
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tid = context.user_data.get("proof_task")
     if not tid:
@@ -325,7 +338,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if t["left"] <= 0:
         t["active"] = False
     save_db(db)
-    await update.message.reply_text(f"✅ Auto Approve হইছে!\n\n🎉 তুমি {WORKER_REWARD} টাকা পাইছো!\n💰 নতুন Balance: {worker['balance']} টাকা")
+    # ✅ টাকা দেওয়ার পর অটোমেটিক /start এর মেনু আবার দেখাবে
+    await update.message.reply_text(f"✅ Auto Approve হইছে!\n\n🎉 তুমি {WORKER_REWARD} টাকা পাইছো!\n💰 নতুন Balance: {worker['balance']} টাকা\n\n👇 আবার মেনু থেকে বেছে নাও:", reply_markup=main_menu(admin=is_admin(user)))
     try:
         await context.bot.send_photo(chat_id=ADMIN_ID, photo=update.message.photo[-1].file_id, caption=f"✅ Auto Approved!\n\nTask: {tid} | {t['title']}\nUser: {user.id} (@{user.username})\nReward: {WORKER_REWARD} টাকা দেওয়া হইছে।\nবাকি: {t['left']}/{t['total']}")
     except Exception as e:
