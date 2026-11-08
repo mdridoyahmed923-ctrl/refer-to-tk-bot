@@ -37,6 +37,13 @@ def get_user(db, user_id, username=""):
 # ===== Flask for Render 24h alive =====
 app_flask = Flask(__name__)
 
+@app_flask.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+    response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    return response
+
 @app_flask.route("/")
 def home():
     return "Refer to Tk Bot is Running!"
